@@ -142,13 +142,17 @@ module Spgateway
     end
 
     def generate_credit_card_period_params(params = {})
-      param_required! params, [:MerchantOrderNo, :ProdDesc, :PeriodAmt, :PeriodAmtMode, :PeriodType, :PeriodPoint, :PeriodStartType, :PeriodTimes]
-
-      generate_params(:credit_card_period, {
+      param_required! params, [:ProdDesc, :PeriodAmt, :PeriodType, :PeriodPoint, :PeriodStartType, :PeriodTimes]
+      all_params = params.merge({
         RespondType: 'String',
         TimeStamp: Time.now.to_i,
         Version: '1.0'
-      }.merge!(params))
+      })
+      encoded_post_data = encode_post_data(URI.encode_www_form(all_params))
+      {
+        'MerchantID_' => options[:merchant_id],
+        'PostData_' => encoded_post_data
+      }
     end
 
     def make_check_value(type, params = {})
@@ -187,7 +191,34 @@ module Spgateway
       encrypted.unpack('H*').first
     end
 
+    def decode_post_data(data)
+      data = [data].pack('H*')
+      decipher = OpenSSL::Cipher::AES256.new(:CBC)
+      decipher.decrypt
+      decipher.padding = 0
+      decipher.key = @options[:hash_key]
+      decipher.iv = @options[:hash_iv]
+      ddata = (decipher.update(data) + decipher.final)
+
+    end
+
+    def verify_period_post_param(encoded_param)
+      ddata = decode_post_data(encoded_param)
+      Rack::Utils.parse_nested_query(strippadding(ddata))
+    end
+
     private
+
+		def strippadding(data)
+			slast = data[-1].ord
+			slastc = slast.chr
+			padding_index = /#{slastc}{#{slast}}/ =~ data
+			if padding_index != nil
+				data[0, padding_index]
+			else
+				false
+			end
+		end
 
     def option_required!(*option_names)
       option_names.each do |option_name|
